@@ -1,22 +1,63 @@
-import { useState } from 'react';
-import { DailyProvider } from '@daily-co/daily-react';
+import { useState, useEffect } from 'react';
+import { DailyProvider, useDaily, useLocalSessionId, useParticipantIds, DailyVideo, DailyAudio } from '@daily-co/daily-react';
 
-function App() {
-  const [token, setToken] = useState('');
-  const [isCallStarted, setIsCallStarted] = useState(false);
+// Video component that displays the video feed
+const Video = ({ id }: { id: string }) => {
+  return (
+    <DailyVideo
+      automirror
+      sessionId={id}
+      type="video"
+      className="h-full w-full rounded-lg object-cover"
+    />
+  );
+};
+
+// Call component that manages the video call interface
+const Call = ({ onLeave }: { onLeave: () => void }) => {
+  const remoteParticipantIds = useParticipantIds({ filter: 'remote' });
+  const localSessionId = useLocalSessionId();
+  const daily = useDaily();
+
+  return (
+    <div className="relative h-screen bg-gray-900">
+      <div className="absolute inset-0 flex items-center justify-center">
+        {remoteParticipantIds.length > 0 ? (
+          <Video id={remoteParticipantIds[0]} />
+        ) : (
+          <div className="text-white">Waiting for connection...</div>
+        )}
+      </div>
+      {localSessionId && (
+        <div className="absolute bottom-4 right-4 h-48 w-64 overflow-hidden rounded-lg border-2 border-white/20">
+          <Video id={localSessionId} />
+        </div>
+      )}
+      <button
+        onClick={onLeave}
+        className="absolute right-4 top-4 rounded-full bg-red-500 px-4 py-2 text-white hover:bg-red-600"
+      >
+        Leave Call
+      </button>
+      <DailyAudio />
+    </div>
+  );
+};
+
+// Main App component
+function AppContent() {
+  const [conversation, setConversation] = useState<{ conversation_url: string } | null>(null);
+  const daily = useDaily();
+
+  const TAVUS_TOKEN = 'fbc189f1d04d4710bc46a2d785a4f92d';
 
   const handleStartCall = async () => {
-    if (!token) {
-      alert('Please enter your Tavus API token');
-      return;
-    }
-
     try {
       const response = await fetch('https://tavusapi.com/v2/conversations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': token,
+          'x-api-key': TAVUS_TOKEN,
         },
         body: JSON.stringify({
           persona_id: 'p9a95912', // Demo Persona
@@ -28,64 +69,54 @@ function App() {
       }
 
       const data = await response.json();
-      setIsCallStarted(true);
+      setConversation(data);
       
-      // Initialize call frame
-      const callFrame = await window.DailyIframe.createFrame({
-        iframeStyle: {
-          position: 'fixed',
-          top: '0',
-          left: '0',
-          width: '100%',
-          height: '100%',
-        },
-      });
-
-      await callFrame.join({ url: data.conversation_url });
-
+      if (daily) {
+        await daily.join({ url: data.conversation_url });
+      }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to start conversation. Please check your API token.');
+      alert('Failed to start conversation');
     }
   };
 
+  const handleLeave = async () => {
+    if (daily) {
+      await daily.leave();
+    }
+    setConversation(null);
+  };
+
+  useEffect(() => {
+    if (conversation?.conversation_url && daily) {
+      daily.join({ url: conversation.conversation_url });
+    }
+  }, [conversation?.conversation_url, daily]);
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-gray-100">
+      {!conversation ? (
+        <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-lg">
+          <h1 className="mb-6 text-2xl font-bold">Tavus Demo</h1>
+          <button
+            onClick={handleStartCall}
+            className="w-full rounded-lg bg-blue-500 px-4 py-2 text-white transition-colors hover:bg-blue-600"
+          >
+            Start Conversation
+          </button>
+        </div>
+      ) : (
+        <Call onLeave={handleLeave} />
+      )}
+    </main>
+  );
+}
+
+// Wrap the app with DailyProvider
+function App() {
   return (
     <DailyProvider>
-      <main className="min-h-screen bg-gray-100 p-4">
-        <div className="mx-auto max-w-md">
-          {!isCallStarted ? (
-            <div className="rounded-lg bg-white p-6 shadow-lg">
-              <h1 className="mb-4 text-2xl font-bold">Tavus Demo</h1>
-              <input
-                type="text"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Enter your Tavus API token"
-                className="mb-4 w-full rounded border p-2"
-              />
-              <button
-                onClick={handleStartCall}
-                className="w-full rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
-              >
-                Start Conversation
-              </button>
-              <p className="mt-4 text-sm text-gray-600">
-                Don't have a token?{' '}
-                <a
-                  href="https://platform.tavus.io/api-keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
-                  Get one here
-                </a>
-              </p>
-            </div>
-          ) : (
-            <div id="call-frame"></div>
-          )}
-        </div>
-      </main>
+      <AppContent />
     </DailyProvider>
   );
 }
